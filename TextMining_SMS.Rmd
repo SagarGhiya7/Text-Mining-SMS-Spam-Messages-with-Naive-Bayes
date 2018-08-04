@@ -1,0 +1,236 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+Loading data
+
+```{r}
+sms_raw <- read.csv("C:/Users/Sagar Ghiya/Desktop/sms_spam.csv", stringsAsFactors = FALSE)
+```
+
+Checking structure of data
+
+```{r}
+str(sms_raw)
+```
+
+Converting sms type(ham or spam) into factor
+
+```{r}
+sms_raw$type <- factor(sms_raw$type)
+```
+
+Verifying the structure
+
+```{r}
+str(sms_raw$type)
+```
+Check total number of ham and spam
+ 
+```{r}
+table(sms_raw$type)
+```
+Loading text mining package tm. Creating temporary Corpus to store text data 
+
+```{r}
+library(tm)
+sms_corpus <- VCorpus(VectorSource(sms_raw$text))
+```
+
+```{r}
+print(sms_corpus)
+```
+
+Inspecting the structure for corpus
+
+```{r}
+inspect(sms_corpus[1:2])
+```
+
+
+```{r}
+as.character(sms_corpus[[1]])
+```
+
+```{r}
+lapply(sms_corpus[1:2], as.character)
+```
+Now next task is to make data consistent. That will be achieved by series of steps
+
+Converting everything into lowercase so that "Upper" and "upper" are same when we analyze
+```{r}
+sms_corpus_clean <- tm_map(sms_corpus,content_transformer(tolower))
+```
+
+Checking transformation
+
+```{r}
+as.character(sms_corpus[[1]])
+as.character(sms_corpus_clean[[1]])
+```
+Removing numbers as we don't need them for this code
+
+```{r}
+sms_corpus_clean <- tm_map(sms_corpus_clean,removeNumbers)
+```
+
+Removing stopwords
+
+```{r}
+sms_corpus_clean <- tm_map(sms_corpus_clean,removeWords, stopwords())
+```
+
+Removing Punctuation 
+
+```{r}
+sms_corpus_clean <- tm_map(sms_corpus_clean, removePunctuation)
+```
+Loading package snowballC for preparing wordcloud
+Also stemming document i.e learning will become learn.
+
+```{r}
+library(SnowballC)
+sms_corpus_clean <- tm_map(sms_corpus_clean, stemDocument)
+```
+
+Removing White space
+
+```{r}
+sms_corpus_clean <- tm_map(sms_corpus_clean, stripWhitespace)
+```
+
+
+```{r}
+lapply(sms_corpus_clean[1:2], as.character)
+```
+
+
+```{r}
+sms_dtm <- DocumentTermMatrix(sms_corpus_clean)
+```
+
+Another way to clean the corpus. 
+```{r}
+sms_dtm2 <- DocumentTermMatrix(sms_corpus, control=list(tolower=TRUE, removeNumbers=TRUE,stopwords =TRUE, removePunctuation=TRUE, stemming=TRUE))
+```
+
+
+
+```{r}
+
+sms_dtm
+```
+
+```{r}
+sms_dtm2
+```
+Dividing the data into train and test
+
+```{r}
+sms_dtm_train <- sms_dtm[1:4180,]
+sms_dtm_test <- sms_dtm[4181:5574,]
+```
+Dividing labels into train and test
+
+```{r}
+sms_train_labels <- sms_raw[1:4180,]$type
+sms_test_labels <- sms_raw[4181:5574,]$type
+```
+
+Checking to see if spam are divided equally in both test and train
+```{r}
+prop.table(table(sms_train_labels))
+```
+
+```{r}
+prop.table(table(sms_test_labels))
+```
+
+Loading Wordcloud package
+Creating wordcloud for cleaned corpus
+```{r}
+library(wordcloud)
+wordcloud(sms_corpus_clean, min.freq=50,random.order=FALSE)
+```
+Sperating sam and ham messages to visualize them
+```{r}
+spam <- subset(sms_raw, type =="spam")
+ham <- subset(sms_raw, type =="ham")
+```
+
+Wordcloud for spam
+```{r}
+wordcloud(spam$text, max.words=40,scale=c(3,0.5))
+```
+Wordcloud for ham
+```{r}
+wordcloud(ham$text, max.words=40, scale=c(3,0.5))
+```
+Only keeping words that atleast occur 5 times
+```{r}
+sms_freq_words <- findFreqTerms(sms_dtm_train,5)
+```
+
+Checking structure
+```{r}
+str(sms_freq_words)
+```
+
+Train and test datasets having words which occur atleast 5 times
+```{r}
+sms_dtm_freq_train<- sms_dtm_train[ , sms_freq_words] 
+sms_dtm_freq_test <- sms_dtm_test[ , sms_freq_words]
+```
+
+Function to convert counts into "yes" and 0 counts into "No"
+```{r}
+convert_counts <- function(x) {
+  x <- ifelse(x>0, "Yes", "No")
+}
+```
+
+Transforming for train and test sets
+```{r}
+sms_train <- apply(sms_dtm_freq_train, MARGIN=2, convert_counts)
+sms_test <- apply(sms_dtm_freq_test, MARGIN=2, convert_counts)
+
+
+```
+
+Building Naive Bayes model using e1071 package
+Prediciting for test set
+```{r}
+library(e1071)
+sms_classifier <- naiveBayes(sms_train,sms_train_labels)
+sms_test_predict <- predict(sms_classifier,sms_test)
+```
+
+Making crosstable matrix to check for accuracy
+
+
+
+```{r}
+library(gmodels)
+CrossTable(sms_test_predict, sms_test_labels, prop.chisq=F, prop.t=F, dnn=c('predicted','actual'))
+```
+Accuracy = (1203+162)/1394 = 97.92%
+
+Adding laplace estimator to possibly increase accuracy if there is any data that appears in test set but not in train. 
+```{r}
+library(e1071)
+sms_classifier2 <- naiveBayes(sms_train,sms_train_labels, laplace=1)
+sms_test_predict2 <- predict(sms_classifier2,sms_test)
+```
+
+Bulding crosstable matrix to check for accuracy
+```{r}
+library(gmodels)
+CrossTable(sms_test_predict2, sms_test_labels, prop.chisq=F, prop.t=F, prop.r=F,dnn=c('predicted','actual'))
+```
+Accuracy = (1205 + 154)/1394   *100 = 97.49%
+
+Thus laplace estimator helps to classify those set of data that appear in test dataset but not in train dataset. Because if we don't use laplace estimator, there will be data with 0 probabilites. However, as in this case, using laplace estimators and adding 1 to the count, may tweak probability estimates and decrease accuracy. However our purpose is that they should be above some threshold. 
+
